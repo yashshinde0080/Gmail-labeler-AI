@@ -335,33 +335,33 @@ def start_scheduler() -> None:
 
     scheduler = get_scheduler()
 
-    # Main job — run immediately on startup then every N minutes
+    # Main job — run immediately on startup then every N seconds
     scheduler.add_job(
         process_new_emails,
-        trigger=IntervalTrigger(minutes=_settings.poll_interval_minutes),
+        trigger=IntervalTrigger(seconds=_settings.poll_interval_seconds),
         id="process_emails",
         name="Process New Emails",
         replace_existing=True,
-        max_instances=1,  # Prevent overlapping runs
-        misfire_grace_time=120,  # Allow up to 2 min late start
+        max_instances=1,
+        misfire_grace_time=30,
         next_run_time=datetime.now(UTC),  # Run immediately
     )
 
-    # Retry job — offset by 2 minutes so retries happen after the main job
+    # Retry job — offset so retries happen after the main job
     scheduler.add_job(
         retry_failed_emails,
-        trigger=IntervalTrigger(minutes=_settings.poll_interval_minutes),
+        trigger=IntervalTrigger(seconds=_settings.poll_interval_seconds),
         id="retry_emails",
         name="Retry Failed Emails",
         replace_existing=True,
         max_instances=1,
-        misfire_grace_time=120,
+        misfire_grace_time=30,
     )
 
     scheduler.start()
     logger.info(
         "Scheduler started",
-        interval_minutes=_settings.poll_interval_minutes,
+        interval_seconds=_settings.poll_interval_seconds,
     )
 
 

@@ -1,0 +1,21 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ruff — fast Python linter & formatter
+# ─────────────────────────────────────────────────────────────────────────────
+target-version = "py312"
+line-length = 88
+
+[lint]
+select = [
+    "F",   # pyflakes — errors
+    "E",   # pycodestyle — style
+    "W",   # pycodestyle — warnings
+    "I",   # isort — import sorting
+    "N",   # pep8-naming
+    "UP",  # pyupgrade — modern syntax
+]
+ignore = [
+    "E501",  # line too long — covered by formatter
+]
+
+[format]
+quote-style = "double"

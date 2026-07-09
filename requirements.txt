@@ -1,0 +1,53 @@
+# ==============================================================================
+# Gmail AI Auto Labeler
+# Python >=3.13
+# ==============================================================================
+
+# Web
+fastapi>=0.115.5,<1.0
+uvicorn[standard]>=0.32.1,<1.0
+
+# AI
+groq>=0.13.1
+
+# Gmail
+google-auth>=2.36.0
+google-auth-oauthlib>=1.2.1
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.154.0
+
+# Database
+sqlalchemy>=2.0.36
+
+# Scheduler
+apscheduler>=3.10.4
+
+# Config
+pydantic>=2.10.2
+pydantic-settings>=2.6.1
+python-dotenv>=1.0.1
+
+# Fuzzy Matching
+thefuzz>=0.22.1
+rapidfuzz>=3.14.0
+
+# HTML
+beautifulsoup4>=4.12.3
+lxml>=6.0.0
+
+# HTTP
+httpx>=0.28.1
+
+# Retry
+tenacity>=9.0.0
+
+# Logging
+structlog>=24.4.0
+
+# Dates
+python-dateutil>=2.9.0.post0
+
+# Testing
+pytest>=8.3.4
+pytest-asyncio>=0.24.0
+pytest-cov>=6.0.0

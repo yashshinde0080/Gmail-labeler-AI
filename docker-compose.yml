@@ -1,0 +1,37 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Local development compose file.
+# Run:  docker compose up --build
+# ─────────────────────────────────────────────────────────────────────────────
+version: "3.9"
+
+services:
+  gmail-labeler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: gmail_ai_labeler
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # Persist the database and logs between container restarts
+      - gmail_data:/app/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  gmail_data:
+    driver: local

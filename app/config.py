@@ -37,14 +37,15 @@ class Settings(BaseSettings):
     # ── Gmail OAuth2 ─────────────────────────────────────────────────────
     gmail_client_id: str = Field(..., description="Google OAuth2 client ID")
     gmail_client_secret: str = Field(..., description="Google OAuth2 client secret")
-    gmail_redirect_uri: str = Field(default="http://localhost:8080")
+    gmail_refresh_token: str = Field(..., description="Gmail OAuth2 refresh token")
+    gmail_redirect_uri: str = Field(default="http://localhost:8000")
     gmail_scopes: str = Field(default="https://www.googleapis.com/auth/gmail.modify")
 
     # ── Database ─────────────────────────────────────────────────────────
     database_url: str = Field(default="sqlite:///./data/gmail.db")
 
     # ── Scheduler ────────────────────────────────────────────────────────
-    poll_interval_minutes: int = Field(default=5, ge=1, le=60)
+    poll_interval_seconds: int = Field(default=10, ge=10, le=3600)
     scheduler_enabled: bool = Field(default=True)
     retry_max_attempts: int = Field(default=3, ge=1)
     retry_backoff_base: int = Field(default=2, ge=1)
@@ -64,8 +65,6 @@ class Settings(BaseSettings):
     # ── Paths ────────────────────────────────────────────────────────────
     data_dir: str = Field(default="./data")
     log_dir: str = Field(default="./data/logs")
-    token_path: str = Field(default="./data/token.json")
-    credentials_path: str = Field(default="./data/credentials.json")
 
     # ── Derived properties ───────────────────────────────────────────────
     @property
