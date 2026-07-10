@@ -172,3 +172,21 @@ class AppSetting(Base):
 
     def __repr__(self) -> str:
         return f"<AppSetting key={self.key!r} value={self.value!r}>"
+
+
+class OAuthToken(Base):
+    """
+    Encrypted storage for Gmail OAuth2 tokens.
+    """
+    __tablename__ = "oauth_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String(64), unique=True, default="default", nullable=False)
+    access_token_encrypted: Mapped[bytes] = mapped_column(nullable=False)
+    refresh_token_encrypted: Mapped[bytes] = mapped_column(nullable=True)
+    expiry: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<OAuthToken id={self.id} user={self.user_id!r}>"

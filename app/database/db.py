@@ -33,30 +33,12 @@ _settings = get_settings()
 # ── Engine ────────────────────────────────────────────────────────────────────
 engine = create_engine(
     _settings.database_url,
-    connect_args={
-        "check_same_thread": False,  # Required for SQLite + threading
-        "timeout": 30,  # Wait up to 30 s on a locked DB
-    },
+    connect_args={"check_same_thread": False} if "sqlite" in _settings.database_url else {},
     pool_size=5,
     max_overflow=10,
     pool_recycle=3600,
-    echo=False,  # Set True to log raw SQL during debugging
+    echo=False,
 )
-
-
-@event.listens_for(engine, "connect")
-def _set_sqlite_pragmas(dbapi_conn, _connection_record):
-    """
-    Apply SQLite performance and correctness settings on every new connection.
-    These cannot be set globally; they must be applied per-connection.
-    """
-    cursor = dbapi_conn.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL;")  # Write-Ahead Logging
-    cursor.execute("PRAGMA foreign_keys=ON;")  # Enforce FK constraints
-    cursor.execute("PRAGMA synchronous=NORMAL;")  # Balance safety vs speed
-    cursor.execute("PRAGMA cache_size=-64000;")  # 64 MB page cache
-    cursor.execute("PRAGMA temp_store=MEMORY;")  # Temp tables in RAM
-    cursor.close()
 
 
 # ── Session factory ───────────────────────────────────────────────────────────
