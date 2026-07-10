@@ -17,6 +17,11 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+limiter = Limiter(key_func=get_remote_address)
 
 from app.api import router
 from app.config import get_settings
@@ -28,7 +33,6 @@ from app.scheduler import start_scheduler, stop_scheduler
 setup_logging()
 logger = get_logger(__name__)
 _settings = get_settings()
-
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
@@ -45,7 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info(
         "Gmail AI Auto Labeler starting",
         model=_settings.groq_model,
-        poll_interval_minutes=_settings.poll_interval_minutes,
+        poll_interval_seconds=_settings.poll_interval_seconds,
         database=_settings.database_url,
     )
 
@@ -81,6 +85,9 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(

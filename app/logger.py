@@ -60,12 +60,8 @@ def setup_logging() -> None:
         structlog.processors.StackInfoRenderer(),
     ]
 
-    if sys.stdout.isatty():
-        # Human-friendly output for local development
-        renderer: Any = structlog.dev.ConsoleRenderer(colors=True)
-    else:
-        # Machine-parseable JSON for production / Docker
-        renderer = structlog.processors.JSONRenderer()
+    # Enforce machine-parseable JSON for production / Docker / CI
+    renderer = structlog.processors.JSONRenderer()
 
     structlog.configure(
         processors=[

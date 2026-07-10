@@ -37,7 +37,7 @@ from app.gmail.labels import (
     find_best_label_match,
     star_message,
 )
-from app.gmail.messages import get_message_detail, list_new_message_ids
+from app.gmail.messages import get_message_detail
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -51,7 +51,12 @@ def get_scheduler() -> BackgroundScheduler:
     """Return the global scheduler, creating it if necessary."""
     global _scheduler  # noqa: PLW0603
     if _scheduler is None:
-        _scheduler = BackgroundScheduler(timezone="UTC")
+        from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+        from app.database.db import engine
+        jobstores = {
+            'default': SQLAlchemyJobStore(engine=engine)
+        }
+        _scheduler = BackgroundScheduler(jobstores=jobstores, timezone="UTC")
     return _scheduler
 
 
@@ -60,12 +65,13 @@ def get_scheduler() -> BackgroundScheduler:
 
 def process_new_emails() -> dict[str, int]:
     """
-    Full email processing pipeline:
+    Full email processing pipeline (Cron / Manual Sync):
 
         1. Ensure Gmail credentials are valid.
-        2. Sync the label cache.
-        3. List new message IDs.
-        4. For each message:
+        2. Get current historyId. If we don't have a baseline, save it and exit (do not process old emails).
+        3. Sync the label cache.
+        4. Fetch new messages via History API.
+        5. For each message:
             a. Download details.
             b. Classify with Groq AI.
             c. Resolve / create Gmail label.
@@ -75,7 +81,7 @@ def process_new_emails() -> dict[str, int]:
 
     Returns a summary dict used by the /sync endpoint.
     """
-    logger.info("Starting email processing cycle")
+    logger.info("Starting email processing cycle (History sync)")
     summary = {
         "processed": 0,
         "skipped": 0,
@@ -89,28 +95,55 @@ def process_new_emails() -> dict[str, int]:
     except Exception as exc:
         logger.error("Authentication failed — aborting cycle", error=str(exc))
         return summary
+        
+    from app.database.crud import get_setting, set_setting
+    from app.gmail.service import get_gmail_service
+    from app.gmail.messages import get_new_messages_from_history
+    
+    with get_session() as db:
+        last_history_id = get_setting(db, "last_history_id")
+        
+    service = get_gmail_service()
+    
+    # ── Step 2: Establish Baseline if missing ─────────────────────────────
+    if not last_history_id:
+        try:
+            profile = service.users().getProfile(userId="me").execute()
+            current_history_id = profile.get("historyId")
+            if current_history_id:
+                with get_session() as db:
+                    set_setting(db, "last_history_id", str(current_history_id), "Latest Gmail History ID")
+                logger.info("Baseline historyId established. Skipping old emails.", history_id=current_history_id)
+            return summary
+        except Exception as exc:
+            logger.error("Failed to fetch Gmail profile for baseline historyId", error=str(exc))
+            return summary
 
-    # ── Step 2: Sync labels ───────────────────────────────────────────────
+    # ── Step 3: Fetch new messages from History API ───────────────────────
+    try:
+        message_ids, latest_history_id = get_new_messages_from_history(last_history_id)
+    except Exception as exc:
+        logger.error("Failed to fetch history deltas", error=str(exc))
+        return summary
+        
+    if latest_history_id:
+        with get_session() as db:
+            set_setting(db, "last_history_id", str(latest_history_id))
+
+    if not message_ids:
+        logger.info("No new messages since last sync")
+        return summary
+
+    # ── Step 4: Sync labels ───────────────────────────────────────────────
     try:
         label_map = fetch_and_sync_labels()
     except Exception as exc:
         logger.error("Label sync failed", error=str(exc))
         label_map = {}
 
-    # ── Step 3: List new messages ─────────────────────────────────────────
-    try:
-        message_ids = list_new_message_ids()
-    except Exception as exc:
-        logger.error("Failed to list messages", error=str(exc))
-        return summary
+    logger.info("Processing new messages", count=len(message_ids))
 
-    if not message_ids:
-        logger.info("No new messages to process")
-        return summary
-
-    logger.info("Processing messages", count=len(message_ids))
-
-    # ── Step 4: Process each message ──────────────────────────────────────
+    # ── Step 5: Process each message ──────────────────────────────────────
     for message_id in message_ids:
         result = _process_single_message(message_id, label_map)
 
@@ -132,6 +165,16 @@ def process_new_emails() -> dict[str, int]:
         labels_created=summary["labels_created"],
     )
     return summary
+
+
+def renew_gmail_watch() -> None:
+    """Daily job to renew the Gmail Push Notification watch before it expires (7 days)."""
+    logger.info("Renewing Gmail Push Notification Watch...")
+    try:
+        from app.gmail.messages import start_watch
+        start_watch()
+    except Exception as exc:
+        logger.error("Failed to renew Gmail Watch", error=str(exc))
 
 
 def _process_single_message(
@@ -335,22 +378,22 @@ def start_scheduler() -> None:
 
     scheduler = get_scheduler()
 
-    # Main job — run immediately on startup then every N seconds
+    # Watch Renewal job — run immediately on startup then every 24 hours
     scheduler.add_job(
-        process_new_emails,
-        trigger=IntervalTrigger(seconds=_settings.poll_interval_seconds),
-        id="process_emails",
-        name="Process New Emails",
+        renew_gmail_watch,
+        trigger=IntervalTrigger(hours=24),
+        id="renew_watch",
+        name="Renew Gmail Watch",
         replace_existing=True,
         max_instances=1,
         misfire_grace_time=30,
         next_run_time=datetime.now(UTC),  # Run immediately
     )
 
-    # Retry job — offset so retries happen after the main job
+    # Retry job — run periodically to catch any failed messages
     scheduler.add_job(
         retry_failed_emails,
-        trigger=IntervalTrigger(seconds=_settings.poll_interval_seconds),
+        trigger=IntervalTrigger(minutes=15),
         id="retry_emails",
         name="Retry Failed Emails",
         replace_existing=True,
@@ -360,8 +403,7 @@ def start_scheduler() -> None:
 
     scheduler.start()
     logger.info(
-        "Scheduler started",
-        interval_seconds=_settings.poll_interval_seconds,
+        "Scheduler started with jobs: Watch Renewal (24h), Retry (15m)"
     )
 
 

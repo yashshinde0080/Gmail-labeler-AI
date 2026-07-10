@@ -37,12 +37,17 @@ class Settings(BaseSettings):
     # ── Gmail OAuth2 ─────────────────────────────────────────────────────
     gmail_client_id: str = Field(..., description="Google OAuth2 client ID")
     gmail_client_secret: str = Field(..., description="Google OAuth2 client secret")
-    gmail_refresh_token: str = Field(..., description="Gmail OAuth2 refresh token")
+    gmail_project_id: str = Field(default="yash-gmail-501912")
+    gmail_auth_uri: str = Field(default="https://accounts.google.com/o/oauth2/auth")
+    gmail_token_uri: str = Field(default="https://oauth2.googleapis.com/token")
+    gmail_cert_url: str = Field(default="https://www.googleapis.com/oauth2/v1/certs")
     gmail_redirect_uri: str = Field(default="http://localhost:8000")
+    gcp_pubsub_topic: str = Field(default="projects/YOUR_PROJECT_ID/topics/YOUR_TOPIC_ID")
     gmail_scopes: str = Field(default="https://www.googleapis.com/auth/gmail.modify")
 
-    # ── Database ─────────────────────────────────────────────────────────
-    database_url: str = Field(default="sqlite:///./data/gmail.db")
+    # ── Database & Security ──────────────────────────────────────────────
+    database_url: str = Field(default="postgresql://user:password@localhost/gmail_db")
+    fernet_key: str = Field(..., description="Fernet key for encrypting tokens")
 
     # ── Scheduler ────────────────────────────────────────────────────────
     poll_interval_seconds: int = Field(default=10, ge=10, le=3600)
