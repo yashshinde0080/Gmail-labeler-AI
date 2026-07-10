@@ -378,6 +378,18 @@ def start_scheduler() -> None:
 
     scheduler = get_scheduler()
 
+    # Main polling job — process new emails
+    scheduler.add_job(
+        process_new_emails,
+        trigger=IntervalTrigger(seconds=_settings.poll_interval_seconds),
+        id="poll_emails",
+        name="Poll New Emails",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=30,
+        next_run_time=datetime.now(UTC),  # Run immediately
+    )
+
     # Watch Renewal job — run immediately on startup then every 24 hours
     scheduler.add_job(
         renew_gmail_watch,
@@ -403,7 +415,7 @@ def start_scheduler() -> None:
 
     scheduler.start()
     logger.info(
-        "Scheduler started with jobs: Watch Renewal (24h), Retry (15m)"
+        f"Scheduler started with jobs: Polling ({_settings.poll_interval_seconds}s), Watch Renewal (24h), Retry (15m)"
     )
 
 
