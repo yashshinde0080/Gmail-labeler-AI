@@ -12,74 +12,27 @@ from __future__ import annotations
 
 from typing import Any
 
-# Ordered from most to least specific — the model should prefer specifics
 KNOWN_CATEGORIES: list[str] = [
-    # Work & Professional
-    "Work",
-    "Clients",
-    "Freelancing",
-    "Support Tickets",
-    # Communication
-    "Personal",
-    # Finance
-    "Finance",
-    "Banking",
-    "Invoices",
-    "Receipts",
-    "Bills",
-    "Crypto",
-    "Investments",
-    "Tax",
-    # Shopping & Commerce
-    "Shopping",
-    "Orders",
-    "Amazon",
-    "Flipkart",
-    # Developer Platforms
-    "GitHub",
-    "GitLab",
-    "Docker",
-    "Kubernetes",
-    "Cloud",
-    # Professional Networks
-    "LinkedIn",
-    "Jobs",
-    "Interviews",
-    # Academic
-    "University",
-    "Research",
-    "Conferences",
-    "IEEE",
-    "Taylor & Francis",
-    # Health
-    "Healthcare",
-    "Medical",
-    "Insurance",
-    # Government
-    "Government",
-    "Legal",
-    # Security
-    "OTP",
-    "Password Reset",
-    "Security Alert",
-    # AI / Tech
-    "AI",
-    "Machine Learning",
-    # Marketing
-    "Marketing",
-    "Promotions",
-    "Newsletter",
-    # Social
-    "Social",
-    # Spam-like (but not literal spam)
-    "Spam",
-    # Travel
-    "Travel",
-    "Hotels",
-    "Flights",
-    # Lifestyle
-    "Food",
-    "Entertainment",
+    "🔴 Urgent",
+    "🟠 Action Required",
+    "🟡 Follow Up",
+    "🔵 Important",
+    "💼 Work",
+    "👤 Personal",
+    "💰 Finance",
+    "🛒 Shopping",
+    "✈️ Travel",
+    "🏥 Health",
+    "🤖 AI & Tech",
+    "🔐 Security",
+    "📰 Newsletters",
+    "🎉 Promotions",
+    "📦 Orders",
+    "📅 Meetings",
+    "👥 Clients",
+    "🔄 Waiting Reply",
+    "📚 Learning",
+    "📂 Archive",
 ]
 
 RESPONSE_SCHEMA = """{
