@@ -30,51 +30,83 @@ USER_ID = "me"
 MAX_BODY_CHARS = 4000  # Truncate very long email bodies before sending to AI
 
 
-# ── List New Messages ─────────────────────────────────────────────────────────
+# ── Gmail Push Notifications (Watch & History) ──────────────────────────────────
 
-
-def list_new_message_ids(max_results: int = 50) -> list[str]:
+def start_watch() -> dict[str, Any]:
     """
-    Return Gmail message IDs that are:
-        - In INBOX
-        - NOT in SPAM or TRASH
-        - NOT already recorded in our SQLite database
-
-    max_results caps the number returned in one scheduler cycle to avoid
-    overwhelming the AI tier.
+    Start the Gmail push notification watch.
+    Requires GCP_PUBSUB_TOPIC to be set in config.
     """
     service = get_gmail_service()
-
+    topic = _settings.gcp_pubsub_topic
+    
+    if not topic or topic == "projects/YOUR_PROJECT_ID/topics/YOUR_TOPIC_ID":
+        logger.warning("GCP_PUBSUB_TOPIC not configured — push notifications will not work.")
+        return {}
+    
+    request_body = {
+        "labelIds": ["INBOX"],
+        "labelFilterAction": "include",
+        "topicName": topic
+    }
+    
     try:
-        # Exclude spam, trash, and sent — only look at genuine inbox messages
-        response = (
-            service.users()
-            .messages()
-            .list(
-                userId=USER_ID,
-                labelIds=["INBOX"],
-                q="-in:spam -in:trash",
-                maxResults=max_results,
-            )
-            .execute()
-        )
+        response = service.users().watch(userId=USER_ID, body=request_body).execute()
+        logger.info("Gmail watch started successfully", history_id=response.get("historyId"))
+        return response
     except HttpError as exc:
-        logger.error("Failed to list Gmail messages", error=str(exc))
+        logger.error("Failed to start Gmail watch", error=str(exc))
         raise
 
-    messages = response.get("messages", [])
-    all_ids = [m["id"] for m in messages]
 
+def get_new_messages_from_history(start_history_id: str) -> tuple[list[str], str | None]:
+    """
+    Fetch message IDs added since start_history_id.
+    Returns (list_of_message_ids, new_history_id).
+    If start_history_id is invalid (e.g., expired), returns ([], None).
+    """
+    service = get_gmail_service()
+    try:
+        response = service.users().history().list(
+            userId=USER_ID, 
+            startHistoryId=start_history_id,
+            historyTypes=["messageAdded"]
+        ).execute()
+    except HttpError as exc:
+        if exc.resp.status == 404:
+            logger.warning("History ID expired", start_history_id=start_history_id)
+            return [], None
+        logger.error("History API failed", error=str(exc))
+        raise
+        
+    history = response.get("history", [])
+    new_history_id = response.get("historyId")
+    message_ids = []
+    
+    for record in history:
+        for message_added in record.get("messagesAdded", []):
+            msg = message_added.get("message", {})
+            if msg.get("id"):
+                message_ids.append(msg["id"])
+                
+    # Filter out duplicates (Gmail API can sometimes return the same ID multiple times in history)
+    message_ids = list(set(message_ids))
+    
     # Filter out IDs we have already processed
     with get_session() as db:
-        new_ids = [mid for mid in all_ids if not is_already_processed(db, mid)]
-
+        new_ids = [mid for mid in message_ids if not is_already_processed(db, mid)]
+        
     logger.info(
-        "Message IDs fetched",
-        total=len(all_ids),
+        "History sync complete",
+        start_history_id=start_history_id,
+        new_history_id=new_history_id,
+        found=len(message_ids),
         new=len(new_ids),
     )
-    return new_ids
+    return new_ids, new_history_id
+
+
+
 
 
 # ── Download & Parse ──────────────────────────────────────────────────────────

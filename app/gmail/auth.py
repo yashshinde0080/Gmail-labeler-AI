@@ -1,75 +1,81 @@
 """
 Gmail OAuth2 authentication.
 
-Builds Credentials directly from .env variables — no files needed.
-The google-auth library handles silent token refresh automatically.
+Builds Credentials dynamically and uses encrypted DB storage.
 """
 
 from __future__ import annotations
 
+from cryptography.fernet import Fernet
 from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
 from app.config import get_settings
+from app.database.db import get_session
+from app.database.models import OAuthToken
 from app.logger import get_logger
 
 logger = get_logger(__name__)
 _settings = get_settings()
 
-# Module-level singleton — refreshed in place when the token expires
+_fernet = Fernet(_settings.fernet_key.encode()) if hasattr(_settings, "fernet_key") and _settings.fernet_key else None
 _credentials: Credentials | None = None
 
 
-def _build_credentials() -> Credentials:
-    """Build Credentials from .env variables."""
-    return Credentials(
-        token=None,
-        refresh_token=_settings.gmail_refresh_token,
-        token_uri="https://oauth2.googleapis.com/token",
+def encrypt_token(token: str | None) -> bytes | None:
+    if not token or not _fernet: return None
+    return _fernet.encrypt(token.encode())
+
+
+def decrypt_token(token_bytes: bytes | None) -> str | None:
+    if not token_bytes or not _fernet: return None
+    return _fernet.decrypt(token_bytes).decode()
+
+
+def get_credentials() -> Credentials:
+    """
+    Return valid Gmail credentials from the database.
+    """
+    global _credentials  # noqa: PLW0603
+
+    if _credentials and _credentials.valid:
+        return _credentials
+
+    with get_session() as db:
+        token_record = db.query(OAuthToken).filter_by(user_id="default").first()
+
+    if not token_record:
+        raise RuntimeError("Token missing. Visit /login to authenticate.")
+
+    creds = Credentials(
+        token=decrypt_token(token_record.access_token_encrypted),
+        refresh_token=decrypt_token(token_record.refresh_token_encrypted),
+        token_uri=_settings.gmail_token_uri,
         client_id=_settings.gmail_client_id,
         client_secret=_settings.gmail_client_secret,
         scopes=_settings.scopes_list,
     )
 
-
-def get_credentials() -> Credentials:
-    """
-    Return valid Gmail credentials, refreshing if necessary.
-
-    Flow:
-        1. Return the in-memory singleton if still valid.
-        2. Build fresh Credentials from .env.
-        3. Refresh the access token if expired.
-
-    Raises RuntimeError if refresh fails.
-    """
-    global _credentials  # noqa: PLW0603
-
-    # ── 1. Reuse cached creds if still valid ──────────────────────────────
-    if _credentials and _credentials.valid:
-        return _credentials
-
-    # ── 2. Build from .env ────────────────────────────────────────────────
-    creds = _build_credentials()
-
-    # ── 3. Refresh to get an access token ─────────────────────────────────
     if not creds.valid:
-        if creds.expired and creds.refresh_token:
-            try:
+        try:
+            if creds.expired and creds.refresh_token:
                 logger.info("Refreshing Gmail access token")
                 creds.refresh(Request())
                 logger.info("Gmail token refreshed successfully")
-            except RefreshError as exc:
-                logger.error("Failed to refresh Gmail token", error=str(exc))
-                raise RuntimeError(
-                    f"Gmail token refresh failed: {exc}\n"
-                    "Check that GMAIL_REFRESH_TOKEN in .env is valid."
-                ) from exc
-        else:
-            logger.info("Obtaining initial Gmail access token")
-            creds.refresh(Request())
-            logger.info("Gmail access token obtained")
+                
+                # Save new access token
+                with get_session() as db:
+                    tr = db.query(OAuthToken).filter_by(user_id="default").first()
+                    if tr:
+                        tr.access_token_encrypted = encrypt_token(creds.token)
+                        if creds.refresh_token:
+                            tr.refresh_token_encrypted = encrypt_token(creds.refresh_token)
+            else:
+                raise RuntimeError("Token missing. Visit /login to authenticate.")
+        except Exception as exc:
+            logger.error("Authentication failed", error=str(exc))
+            raise RuntimeError(f"Gmail auth failed: {exc}\nVisit /login to authenticate.") from exc
 
     _credentials = creds
     return _credentials
@@ -79,4 +85,4 @@ def invalidate_credentials() -> None:
     """Force the next call to get_credentials() to do a full refresh."""
     global _credentials  # noqa: PLW0603
     _credentials = None
-    logger.info("Credentials cache invalidated — will refresh on next call")
+    logger.info("Credentials cache invalidated")

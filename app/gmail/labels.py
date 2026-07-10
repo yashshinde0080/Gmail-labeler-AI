@@ -11,6 +11,7 @@ Key responsibilities:
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 from googleapiclient.errors import HttpError
@@ -28,6 +29,40 @@ _settings = get_settings()
 # ── Constants ─────────────────────────────────────────────────────────────────
 FUZZY_MATCH_THRESHOLD = 85  # Min score (0-100) for a name to be "the same" label
 USER_ID = "me"
+
+# Pre-defined allowed colors from Gmail API
+GMAIL_LABEL_COLORS = [
+    {"backgroundColor": "#16a765", "textColor": "#ffffff"},  # Green
+    {"backgroundColor": "#4a86e8", "textColor": "#ffffff"},  # Blue
+    {"backgroundColor": "#a479e2", "textColor": "#ffffff"},  # Purple
+    {"backgroundColor": "#f691b2", "textColor": "#ffffff"},  # Pink
+    {"backgroundColor": "#ffad46", "textColor": "#ffffff"},  # Orange
+    {"backgroundColor": "#fb4c2f", "textColor": "#ffffff"},  # Red
+    {"backgroundColor": "#43d692", "textColor": "#ffffff"},  # Teal
+]
+
+EXACT_LABEL_COLORS = {
+    "🔴 Urgent": {"backgroundColor": "#fb4c2f", "textColor": "#ffffff"},
+    "🟠 Action Required": {"backgroundColor": "#ffad46", "textColor": "#ffffff"},
+    "🟡 Follow Up": {"backgroundColor": "#fad165", "textColor": "#000000"},
+    "🔵 Important": {"backgroundColor": "#4a86e8", "textColor": "#ffffff"},
+    "💼 Work": {"backgroundColor": "#4a86e8", "textColor": "#ffffff"},
+    "👤 Personal": {"backgroundColor": "#a4c2f4", "textColor": "#000000"},
+    "💰 Finance": {"backgroundColor": "#16a765", "textColor": "#ffffff"},
+    "🛒 Shopping": {"backgroundColor": "#a479e2", "textColor": "#ffffff"},
+    "✈️ Travel": {"backgroundColor": "#43d692", "textColor": "#ffffff"},
+    "🏥 Health": {"backgroundColor": "#fb4c2f", "textColor": "#ffffff"},
+    "🤖 AI & Tech": {"backgroundColor": "#a479e2", "textColor": "#ffffff"},
+    "🔐 Security": {"backgroundColor": "#cc3a21", "textColor": "#ffffff"},
+    "📰 Newsletters": {"backgroundColor": "#999999", "textColor": "#ffffff"},
+    "🎉 Promotions": {"backgroundColor": "#fad165", "textColor": "#000000"},
+    "📦 Orders": {"backgroundColor": "#16a765", "textColor": "#ffffff"},
+    "📅 Meetings": {"backgroundColor": "#43d692", "textColor": "#ffffff"},
+    "👥 Clients": {"backgroundColor": "#653e9b", "textColor": "#ffffff"},
+    "🔄 Waiting Reply": {"backgroundColor": "#a479e2", "textColor": "#ffffff"},
+    "📚 Learning": {"backgroundColor": "#a4c2f4", "textColor": "#000000"},
+    "📂 Archive": {"backgroundColor": "#999999", "textColor": "#ffffff"},
+}
 
 
 # ── Normalisation ─────────────────────────────────────────────────────────────
@@ -158,11 +193,18 @@ def create_label(name: str) -> tuple[str, str]:
         HttpError if the Gmail API call fails.
     """
     service = get_gmail_service()
+    
+    color_choice = EXACT_LABEL_COLORS.get(name)
+    if not color_choice:
+        color_choice = GMAIL_LABEL_COLORS[
+            int(hashlib.md5(name.encode()).hexdigest(), 16) % len(GMAIL_LABEL_COLORS)
+        ]
 
     label_body = {
         "name": name,
         "labelListVisibility": "labelShow",
         "messageListVisibility": "show",
+        "color": color_choice,
     }
 
     try:
