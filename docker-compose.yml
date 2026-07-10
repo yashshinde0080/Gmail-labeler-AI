@@ -2,14 +2,11 @@
 # Local development compose file.
 # Run:  docker compose up --build
 # ─────────────────────────────────────────────────────────────────────────────
-version: "3.9"
-
 services:
   gmail-labeler:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime
     container_name: gmail_ai_labeler
     restart: unless-stopped
     ports:
