@@ -64,9 +64,11 @@ jobs:
           GROQ_API_KEY=test_key_not_real
           GMAIL_CLIENT_ID=test_client_id
           GMAIL_CLIENT_SECRET=test_secret
+          GMAIL_REFRESH_TOKEN=test_refresh_token
           DATABASE_URL=sqlite:///./test.db
           LOG_LEVEL=WARNING
           SCHEDULER_ENABLED=false
+          POLL_INTERVAL_SECONDS=30
           EOF
 
       - name: Run tests with coverage
