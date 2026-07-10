@@ -269,8 +269,7 @@ def _process_single_message(
         star_message(message_id)
 
     # ── Archive low-priority messages ─────────────────────────────────────
-    if classification["archive"] and _settings.archive_low_importance:
-        archive_message(message_id)
+    pass  # User requested to only add labels, not transfer/archive.
 
     # ── Persist to SQLite ─────────────────────────────────────────────────
     elapsed_ms = int((time.monotonic() - start) * 1000)
