@@ -281,8 +281,15 @@ async def gmail_webhook(
         if not history_id:
             return {"status": "ignored", "reason": "no historyId"}
             
-        # Process in background
-        background_tasks.add_task(_process_webhook, str(history_id))
+        import os
+        if os.getenv("VERCEL") == "1":
+            # Serverless environments freeze after HTTP response. Must process synchronously.
+            logger.info("Processing webhook synchronously for Vercel")
+            _process_webhook(str(history_id))
+        else:
+            # Process in background for persistent containers
+            background_tasks.add_task(_process_webhook, str(history_id))
+            
         return {"status": "ok"}
     except Exception as exc:
         logger.error("Webhook payload error", error=str(exc))
@@ -354,9 +361,33 @@ async def gmail_status(db: Session = Depends(get_db_session)):
 
 
 # ── Vercel & Control ──────────────────────────────────────────────────────────
+
+import os
+from fastapi import Header
+
+def verify_vercel_cron(authorization: str | None = Header(None)):
+    """Optional security check for Vercel Cron invocations."""
+    cron_secret = _settings.vercel_cron_secret
+    if cron_secret and authorization != f"Bearer {cron_secret}":
+        raise HTTPException(status_code=401, detail="Unauthorized Cron invocation")
+
+@router.get("/api/cron/renew_watch", tags=["Vercel Cron"])
+async def cron_renew_watch(auth: None = Depends(verify_vercel_cron)):
+    """Vercel Serverless Cron endpoint to renew Gmail Watch."""
+    from app.scheduler import renew_gmail_watch
+    renew_gmail_watch()
+    return {"status": "success"}
+
+@router.get("/api/cron/retry", tags=["Vercel Cron"])
+async def cron_retry_failed(auth: None = Depends(verify_vercel_cron)):
+    """Vercel Serverless Cron endpoint to retry failed emails."""
+    from app.scheduler import retry_failed_emails
+    retry_failed_emails()
+    return {"status": "success"}
+
 @router.post("/api/cron/process", tags=["Vercel Cron"])
-async def cron_process_emails():
-    """Vercel Serverless Cron endpoint for processing emails."""
+async def cron_process_emails(auth: None = Depends(verify_vercel_cron)):
+    """Vercel Serverless Cron endpoint for processing emails (Manual fallback)."""
     from app.scheduler import process_new_emails
     summary = process_new_emails()
     return {"status": "success", "summary": summary}

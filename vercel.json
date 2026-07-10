@@ -1,20 +1,25 @@
 {
+  "version": 2,
   "builds": [
     {
-      "src": "api/index.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb"
-      }
+      "src": "app/main.py",
+      "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "api/index.py"
+      "dest": "app/main.py"
     }
   ],
-  "env": {
-    "SCHEDULER_ENABLED": "false"
-  }
+  "crons": [
+    {
+      "path": "/api/cron/renew_watch",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/retry",
+      "schedule": "0,15,30,45 * * * *"
+    }
+  ]
 }

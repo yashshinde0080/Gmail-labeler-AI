@@ -26,12 +26,15 @@ def _configure_stdlib_logging(log_level: str, log_dir: str) -> None:
     Wire up the standard-library logging so that third-party libraries
     (google-auth, httpx, apscheduler …) also flow through structlog.
     """
-    log_path = Path(log_dir) / "app.log"
+    import os
 
     handlers: list[logging.Handler] = [
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(log_path, encoding="utf-8"),
     ]
+    
+    if os.getenv("VERCEL") != "1":
+        log_path = Path(log_dir) / "app.log"
+        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
 
     logging.basicConfig(
         format="%(message)s",

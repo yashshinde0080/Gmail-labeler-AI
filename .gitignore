@@ -224,3 +224,6 @@ __marimo__/
 # Credentials
 token.json
 credentials.json
+
+# Vercel
+.vercel/

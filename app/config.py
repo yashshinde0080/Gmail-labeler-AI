@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     data_dir: str = Field(default="./data")
     log_dir: str = Field(default="./data/logs")
 
+    # ── Vercel ───────────────────────────────────────────────────────────
+    vercel_cron_secret: str | None = Field(default=None, description="Secret for securing cron endpoints")
+
     # ── Derived properties ───────────────────────────────────────────────
     @property
     def scopes_list(self) -> list[str]:
@@ -94,7 +97,11 @@ class Settings(BaseSettings):
         return upper
 
     def ensure_directories(self) -> None:
-        """Create all required data directories on startup."""
+        """Create all required data directories on startup (skipped on Vercel)."""
+        import os
+        if os.getenv("VERCEL") == "1":
+            return
+            
         for path_str in (self.data_dir, self.log_dir):
             path = Path(path_str)
             path.mkdir(parents=True, exist_ok=True)
