@@ -78,7 +78,7 @@ Analyse the email below and classify it into exactly one category.
 ## Rules
 1. Always choose the most specific category available.
 2. Use "create_label" = true ONLY if the email genuinely does not fit any
-   known category. In that case, propose a concise label in "new_label".
+   known category. In that case, propose a concise label in "new_label" and always prepend a relevant emoji (e.g., "🐶 Pets").
 3. Set "importance" to:
    - "high"   → time-sensitive, requires action, security, interviews, invoices
    - "medium" → informational but useful

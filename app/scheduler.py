@@ -265,8 +265,7 @@ def _process_single_message(
         apply_label_to_message(message_id, label_id)
 
     # ── Star important messages ───────────────────────────────────────────
-    if classification["star"] and _settings.star_high_importance:
-        star_message(message_id)
+    pass  # User requested to never star mails.
 
     # ── Archive low-priority messages ─────────────────────────────────────
     pass  # User requested to only add labels, not transfer/archive.

@@ -180,7 +180,7 @@ def _validate_and_sanitise(
 
     # category — must be a non-empty string; strip dangerous chars
     category = str(data.get("category", "Uncategorised")).strip()
-    category = re.sub(r"[^\w\s\-/&]", "", category)[:64]
+    category = category[:64]
     result["category"] = category or "Uncategorised"
 
     # confidence — integer 0-100
@@ -203,7 +203,7 @@ def _validate_and_sanitise(
 
     # new_label — only if create_label is True
     new_label = str(data.get("new_label", "")).strip()
-    new_label = re.sub(r"[^\w\s\-/&]", "", new_label)[:64]
+    new_label = new_label[:64]
     result["new_label"] = new_label if result["create_label"] else ""
 
     # reason — plain text, truncate
