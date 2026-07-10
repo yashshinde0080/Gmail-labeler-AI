@@ -65,66 +65,27 @@ Open `http://localhost:8000/docs` for the interactive API docs.
 4. Add scope: `https://www.googleapis.com/auth/gmail.modify`
 5. Add your Gmail address as a **Test user**
 
-#### Step 3 — OAuth Credentials
+#### Step 3 — OAuth Credentials & Refresh Token
 
 1. **APIs & Services** → **Credentials** → **Create Credentials**
    → **OAuth 2.0 Client ID**
 2. Application type: **Desktop app**
-3. Download the JSON file → save as `data/credentials.json`
-4. Copy `client_id` and `client_secret` into your `.env`
+3. ### Production Deployment
 
-#### Step 4 — Generate `data/token.json`
+#### Standalone (Railway / Render / Docker)
+The application includes a `Dockerfile` for easy deployment.
+1. Deploy the Docker image to your provider.
+2. Set the following environment variables:
+   - `DATABASE_URL` (Postgres)
+   - `FERNET_KEY` (32-byte base64 string)
+   - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_PROJECT_ID`
+3. The background scheduler will run automatically within the container.
 
-The Gmail refresh token is **not** stored in `.env`. Generate it via
-the OAuth flow:
-
-1. Save your OAuth client JSON from Google Cloud Console as
-   `data/credentials.json`
-2. Run this one-time Python script to get your refresh token:
-
-```python
-from google_auth_oauthlib.flow import InstalledAppFlow
-
-flow = InstalledAppFlow.from_client_secrets_file(
-    "data/credentials.json",
-    ["https://www.googleapis.com/auth/gmail.modify"],
-)
-creds = flow.run_local_server(port=8080)
-
-import json, pathlib
-pathlib.Path("data/token.json").write_text(
-    json.dumps({
-        "token": creds.token,
-        "refresh_token": creds.refresh_token,
-        "token_uri": creds.token_uri,
-        "client_id": creds.client_id,
-        "client_secret": creds.client_secret,
-        "scopes": list(creds.scopes or []),
-        "expiry": creds.expiry.isoformat() if creds.expiry else None,
-    }, indent=2)
-)
-print("Saved to data/token.json")
-```
-
-> **Note:** The refresh token is handled automatically from this point on.
-> No manual copy-paste into `.env` is needed.
-
----
-
-## Docker
-
-```bash
-# Build
-docker build -t gmail-ai-labeler .
-
-# Run
-docker run -d \
-  --name gmail-labeler \
-  --env-file .env \
-  -p 8000:8000 \
-  -v $(pwd)/data:/app/data \
-  gmail-ai-labeler
-```
+#### Serverless (Vercel)
+Vercel does not support background threads.
+1. Set up a Postgres database (e.g. Neon, Supabase) and add the URL to `DATABASE_URL`.
+2. Disable the scheduler: `SCHEDULER_ENABLED=false`
+3. Set up Vercel Cron to hit the `/api/cron/process` endpoint every minute.
 
 Or with Docker Compose:
 
@@ -135,22 +96,27 @@ docker compose logs -f
 
 ---
 
-## Deploy to Render
+## Deploy
+
+### Vercel
+
+```bash
+npx vercel --prod
+# Set env vars in Vercel dashboard:
+#   GROQ_API_KEY, GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET
+# Note: scheduler is disabled on Vercel (no background process).
+# Use POST /sync endpoint via cron job instead.
+```
+
+### Render
 
 1. Push your code to GitHub
 2. Go to <https://render.com> → **New** → **Blueprint**
 3. Connect your GitHub repository
-4. Render detects `render.yaml` automatically
-5. Set the following environment variables in the Render dashboard
-   (under **Environment**):
-   - `GROQ_API_KEY`
-   - `GMAIL_CLIENT_ID`
-   - `GMAIL_CLIENT_SECRET`
-6. Generate `data/token.json` locally using the OAuth flow above,
-   then upload it to Render's persistent disk at `/app/data/token.json`
-   (or mount it as a secret file).
-7. Click **Deploy**
-8. Verify: `https://your-service.onrender.com/health`
+4. Set env vars in Render dashboard:
+   - `GROQ_API_KEY`, `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`
+5. Click **Deploy**
+6. Verify: `https://your-service.onrender.com/health`
 
 ---
 
@@ -180,8 +146,7 @@ Full interactive docs: `/docs`
 | `GROQ_TIMEOUT` | `30` | API timeout in seconds |
 | `GMAIL_CLIENT_ID` | — | **Required** |
 | `GMAIL_CLIENT_SECRET` | — | **Required** |
-| `GMAIL_REFRESH_TOKEN` | — | Not used — loaded from `data/token.json` |
-| `POLL_INTERVAL_MINUTES` | `5` | How often to check inbox |
+| `POLL_INTERVAL_SECONDS` | `10` | How often to check inbox (min 10) |
 | `CONFIDENCE_THRESHOLD` | `70` | Minimum AI confidence to act |
 | `ARCHIVE_LOW_IMPORTANCE` | `true` | Archive newsletters/promotions |
 | `STAR_HIGH_IMPORTANCE` | `true` | Star urgent emails |

@@ -18,9 +18,16 @@ google-api-python-client>=2.154.0
 
 # Database
 sqlalchemy>=2.0.36
+psycopg2-binary>=2.9.9
+alembic>=1.13.1
 
 # Scheduler
 apscheduler>=3.10.4
+
+# Security
+cryptography>=42.0.0
+slowapi>=0.1.9
+fastapi-csrf-protect>=0.3.3
 
 # Config
 pydantic>=2.10.2

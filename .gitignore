@@ -152,11 +152,6 @@ activemq-data/
 .envrc
 .venv
 
-# Gmail OAuth credentials (contains real client secrets)
-data/credentials.json
-
-# Gmail token cache
-data/token.json
 env/
 venv/
 ENV/
@@ -225,3 +220,7 @@ __marimo__/
 
 .agents
 .claude
+
+# Credentials
+token.json
+credentials.json
