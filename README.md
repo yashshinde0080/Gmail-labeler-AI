@@ -24,7 +24,7 @@
 
 | Feature | Description |
 |---------|-------------|
-| 🤖 **AI Classification** | Uses **Groq's Llama 3.3 70B** (free tier) to classify every incoming email into smart categories. |
+| 🤖 **AI Classification** | Uses **Groq's Llama 3.1 8B Instant** (free tier) to classify every incoming email into smart categories. |
 | 🏷️ **Auto-Labeling** | Creates and applies color-coded Gmail labels automatically — no manual sorting needed. |
 | ⭐ **Smart Prioritization** | *Configurable — AI detects importance but starring is disabled by default.* |
 | 🗂️ **Auto-Archive Clutter** | *Configurable — AI detects low-importance but archiving is disabled by default.* |
@@ -145,7 +145,7 @@ Visit **http://localhost:8000/login** to authorize the app with your Google acco
 | 2 | Navigate to **API Keys** → **Create API Key** |
 | 3 | Copy the key into `GROQ_API_KEY` in your `.env` |
 
-The free tier offers **30 requests/min** with Llama 3.3 70B — more than enough for personal inbox management.
+The free tier offers generous limits (**30 requests/min**) with Llama 3.1 8B Instant — more than enough for personal inbox management.
 
 ### 📧 Gmail OAuth2
 
@@ -184,9 +184,30 @@ All configuration is managed through environment variables or a `.env` file, val
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `GROQ_API_KEY` | — | **Required.** Your Groq API key. |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model for classification. |
+| `GROQ_MODEL` | `llama-3.1-8b-instant` | Groq model for classification. |
 | `GROQ_TIMEOUT` | `30` | API timeout in seconds. |
 | `GROQ_MAX_RETRIES` | `3` | Max retries for Groq API calls. |
+| `GROQ_REQUESTS_PER_MINUTE` | `30` | Proactive pacing of Groq calls (matches the 8B free tier). |
+| `GROQ_RATE_LIMIT_MAX_WAIT` | `60` | Max seconds to wait for a rate-limit window before deferring a message. |
+
+#### 🚦 Free-tier rate-limit handling
+
+The `llama-3.1-8b-instant` free tier allows roughly **30 requests/min**, and
+each classification costs prompt tokens too. The pipeline degrades gracefully
+when that quota is exhausted:
+
+1. **Paced requests** — calls are spaced by `GROQ_REQUESTS_PER_MINUTE` so a burst
+   of new mail cannot blow straight through the limit.
+2. **Honours `Retry-After`** — a 429 is retried using the window Groq reports,
+   capped at `GROQ_RATE_LIMIT_MAX_WAIT`.
+3. **Cooldown breaker** — after a 429, further calls fail fast (no wasted quota)
+   until the window resets.
+4. **Nothing is mislabelled** — a rate-limited email is *never* labelled
+   `Uncategorised`. The message is deferred to the retry queue, and the rest of
+   the batch is queued too, because the Gmail history ID has already advanced
+   past it.
+5. **Deferrals are free** — unlike a genuine failure, deferrals do not consume a
+   message's retry budget, so a long quota window never abandons an email.
 
 ### Gmail
 
@@ -242,7 +263,7 @@ All configuration is managed through environment variables or a `.env` file, val
 | `POST` | `/sync` | Manually trigger a processing cycle | — |
 | `POST` | `/reprocess` | Re-classify a specific message | — |
 | `POST` | `/webhook/gmail` | Receive Gmail Pub/Sub push notifications | — |
-| `POST` | `/api/cron/process` | Vercel Cron: process new emails | Bearer |
+| `GET`/`POST` | `/api/cron/process` | Vercel Cron: process new emails | Bearer |
 | `GET` | `/api/cron/retry` | Vercel Cron: retry failed emails | Bearer |
 | `GET` | `/api/cron/renew_watch` | Vercel Cron: renew Gmail watch (daily) | Bearer |
 
@@ -353,7 +374,7 @@ docker run -d --env-file .env -p 8000:8000 gmail-ai-labeler
 1. Set `SCHEDULER_ENABLED=false` in environment
 2. Use a PostgreSQL database (e.g., [Neon](https://neon.tech) or [Supabase](https://supabase.com))
 3. Set up [Vercel Cron Jobs](https://vercel.com/docs/cron-jobs) to call:
-   - `POST /api/cron/process` — every 1 minute
+   - `GET /api/cron/process` — every 1 minute
    - `GET /api/cron/retry` — every 15 minutes
    - `GET /api/cron/renew_watch` — daily at midnight
 
@@ -484,7 +505,7 @@ Six SQLAlchemy models power the application:
 
 | Component | Estimated Cost |
 |-----------|---------------|
-| 🤖 **Groq API** | **Free** — 30 req/min with Llama 3.3 70B |
+| 🤖 **Groq API** | **Free** — 30 req/min with Llama 3.1 8B Instant |
 | 📧 **Gmail API** | **Free** — standard quota (1 billion queries/day) |
 | 🗄️ **SQLite / PostgreSQL** | **Free** — SQLite (local) or Neon free tier (cloud) |
 | 🐳 **Docker / Render** | **Free** — Render free plan (750 hours/month) |
@@ -500,7 +521,7 @@ Six SQLAlchemy models power the application:
 |-------|-----------|
 | **Runtime** | Python 3.12 |
 | **Web Framework** | FastAPI + Uvicorn |
-| **AI / LLM** | Groq (Llama 3.3 70B) |
+| **AI / LLM** | Groq (Llama 3.1 8B Instant) |
 | **Email API** | Google Gmail API v1 |
 | **Database** | SQLAlchemy ORM (SQLite / PostgreSQL) |
 | **Scheduler** | APScheduler |

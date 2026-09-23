@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from app.ai.classifier import _parse_json, _validate_and_sanitise, classify_email
+from app.ai.groq_client import GroqRateLimitedError
 
 # ── _parse_json ───────────────────────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ class TestClassifyEmail:
         "content": '{"category":"Finance","confidence":95,"importance":"high",'
         '"archive":false,"star":true,"create_label":false,'
         '"new_label":"","reason":"Invoice email"}',
-        "model": "llama-3.3-70b-versatile",
+        "model": "llama-3.1-8b-instant",
         "prompt_tokens": 300,
         "completion_tokens": 50,
         "total_tokens": 350,
@@ -142,6 +143,8 @@ class TestClassifyEmail:
         assert result["confidence"] == 95
         assert result["importance"] == "high"
         assert result["star"] is True
+        assert result["ai_success"] is True
+        assert result["rate_limited"] is False
 
     @patch("app.ai.classifier.call_groq")
     @patch("app.ai.classifier.create_ai_log")
@@ -156,3 +159,22 @@ class TestClassifyEmail:
         # Should return the fallback, not raise
         assert result["category"] == "Uncategorised"
         assert result["confidence"] == 0
+        assert result["ai_success"] is False
+        assert result["rate_limited"] is False
+
+    @patch("app.ai.classifier.call_groq")
+    @patch("app.ai.classifier.create_ai_log")
+    @patch("app.ai.classifier.get_session")
+    def test_rate_limit_is_flagged_for_deferral(
+        self, mock_session, mock_log, mock_groq
+    ):
+        mock_groq.side_effect = GroqRateLimitedError("slow down", retry_after=42)
+        mock_session.return_value.__enter__ = MagicMock(return_value=MagicMock())
+        mock_session.return_value.__exit__ = MagicMock(return_value=False)
+
+        result = classify_email(self._sample_email)
+
+        # A rate limit must not look like a real "Uncategorised" verdict.
+        assert result["rate_limited"] is True
+        assert result["ai_success"] is False
+        assert result["retry_after"] == 42

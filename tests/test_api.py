@@ -88,6 +88,17 @@ async def test_metrics_returns_expected_shape():
 
 
 @pytest.mark.anyio
+async def test_cron_process_accepts_get():
+    """Vercel Cron always issues GET, so this route must not return 405."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/api/cron/process")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+@pytest.mark.anyio
 async def test_reprocess_unknown_message_returns_404():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"

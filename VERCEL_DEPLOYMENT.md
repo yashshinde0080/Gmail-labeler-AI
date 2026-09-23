@@ -36,11 +36,11 @@ Add all of these to your Vercel project before deploying:
 - `GMAIL_CERT_URL` = `https://www.googleapis.com/oauth2/v1/certs`
 - `GMAIL_REDIRECT_URI` = `https://<YOUR_VERCEL_DOMAIN>/` (Must match the exact URL configured in Google Cloud Console)
 - `GCP_PUBSUB_TOPIC` = (Your Google Cloud Pub/Sub topic for push notifications)
-- `ENCRYPTION_KEY` = (A 32-byte url-safe base64 string for encrypting OAuth tokens in the DB)
+- `FERNET_KEY` = (A 32-byte url-safe base64 string for encrypting OAuth tokens in the DB)
 
 ### AI Configuration
 - `GROQ_API_KEY` = (Your Groq API key)
-- `GROQ_MODEL` = `llama-3.3-70b-versatile` (Or your preferred model)
+- `GROQ_MODEL` = `llama-3.1-8b-instant` (Or your preferred model)
 
 ## Post-Deployment
 

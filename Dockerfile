@@ -1,10 +1,10 @@
-FROM python:3.11-slim AS builder
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 COPY requirements.txt .
 RUN pip wheel --no-cache-dir --no-deps --wheel-dir /app/wheels -r requirements.txt
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
@@ -19,6 +19,7 @@ RUN chown -R appuser:appuser /app
 USER appuser
 
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=3s CMD curl -f http://localhost:8000/health || exit 1
+# The slim image has no curl, so probe with the bundled Python instead.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')" || exit 1
 
 CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
