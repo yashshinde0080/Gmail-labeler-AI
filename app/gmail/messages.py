@@ -32,6 +32,7 @@ MAX_BODY_CHARS = 4000  # Truncate very long email bodies before sending to AI
 
 # ── Gmail Push Notifications (Watch & History) ──────────────────────────────────
 
+
 def start_watch() -> dict[str, Any]:
     """
     Start the Gmail push notification watch.
@@ -39,63 +40,96 @@ def start_watch() -> dict[str, Any]:
     """
     service = get_gmail_service()
     topic = _settings.gcp_pubsub_topic
-    
+
     if not topic or topic == "projects/YOUR_PROJECT_ID/topics/YOUR_TOPIC_ID":
-        logger.warning("GCP_PUBSUB_TOPIC not configured — push notifications will not work.")
+        logger.warning(
+            "GCP_PUBSUB_TOPIC not configured — push notifications will not work."
+        )
         return {}
-    
+
     request_body = {
         "labelIds": ["INBOX"],
         "labelFilterAction": "include",
-        "topicName": topic
+        "topicName": topic,
     }
-    
+
     try:
         response = service.users().watch(userId=USER_ID, body=request_body).execute()
-        logger.info("Gmail watch started successfully", history_id=response.get("historyId"))
+        logger.info(
+            "Gmail watch started successfully", history_id=response.get("historyId")
+        )
         return response
     except HttpError as exc:
         logger.error("Failed to start Gmail watch", error=str(exc))
         raise
 
 
-def get_new_messages_from_history(start_history_id: str) -> tuple[list[str], str | None]:
+def get_current_history_id() -> str | None:
+    """
+    Return the mailbox's current historyId.
+
+    Used to re-establish a sync baseline after Gmail expires a stored
+    history ID — they are only valid for a few days of inactivity.
+    """
+    service = get_gmail_service()
+    profile = service.users().getProfile(userId=USER_ID).execute()
+    history_id = profile.get("historyId")
+    return str(history_id) if history_id else None
+
+
+def get_new_messages_from_history(
+    start_history_id: str,
+) -> tuple[list[str], str | None]:
     """
     Fetch message IDs added since start_history_id.
+
     Returns (list_of_message_ids, new_history_id).
-    If start_history_id is invalid (e.g., expired), returns ([], None).
+    If start_history_id has expired, an empty list plus a *fresh* baseline
+    historyId is returned so the caller can recover — returning None there
+    would leave the expired ID stored and stall the pipeline permanently.
     """
     service = get_gmail_service()
     try:
-        response = service.users().history().list(
-            userId=USER_ID, 
-            startHistoryId=start_history_id,
-            historyTypes=["messageAdded"]
-        ).execute()
+        response = (
+            service.users()
+            .history()
+            .list(
+                userId=USER_ID,
+                startHistoryId=start_history_id,
+                historyTypes=["messageAdded"],
+            )
+            .execute()
+        )
     except HttpError as exc:
         if exc.resp.status == 404:
-            logger.warning("History ID expired", start_history_id=start_history_id)
-            return [], None
+            # Gmail discards history IDs after a few days. Without a fresh
+            # baseline every later sync would fail identically and the app
+            # would silently stop labelling new mail forever.
+            logger.warning(
+                "History ID expired — re-establishing baseline",
+                start_history_id=start_history_id,
+            )
+            return [], get_current_history_id()
         logger.error("History API failed", error=str(exc))
         raise
-        
+
     history = response.get("history", [])
     new_history_id = response.get("historyId")
     message_ids = []
-    
+
     for record in history:
         for message_added in record.get("messagesAdded", []):
             msg = message_added.get("message", {})
             if msg.get("id"):
                 message_ids.append(msg["id"])
-                
+
     # Filter out duplicates (Gmail API can sometimes return the same ID multiple times in history)
     message_ids = list(set(message_ids))
-    
+
     # Filter out IDs we have already processed
     with get_session() as db:
         new_ids = [mid for mid in message_ids if not is_already_processed(db, mid)]
-        
+
     logger.info(
         "History sync complete",
         start_history_id=start_history_id,
@@ -104,9 +138,6 @@ def get_new_messages_from_history(start_history_id: str) -> tuple[list[str], str
         new=len(new_ids),
     )
     return new_ids, new_history_id
-
-
-
 
 
 # ── Download & Parse ──────────────────────────────────────────────────────────

@@ -7,7 +7,6 @@ Builds Credentials dynamically and uses encrypted DB storage.
 from __future__ import annotations
 
 from cryptography.fernet import Fernet
-from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
@@ -19,17 +18,23 @@ from app.logger import get_logger
 logger = get_logger(__name__)
 _settings = get_settings()
 
-_fernet = Fernet(_settings.fernet_key.encode()) if hasattr(_settings, "fernet_key") and _settings.fernet_key else None
+_fernet = (
+    Fernet(_settings.fernet_key.encode())
+    if hasattr(_settings, "fernet_key") and _settings.fernet_key
+    else None
+)
 _credentials: Credentials | None = None
 
 
 def encrypt_token(token: str | None) -> bytes | None:
-    if not token or not _fernet: return None
+    if not token or not _fernet:
+        return None
     return _fernet.encrypt(token.encode())
 
 
 def decrypt_token(token_bytes: bytes | None) -> str | None:
-    if not token_bytes or not _fernet: return None
+    if not token_bytes or not _fernet:
+        return None
     return _fernet.decrypt(token_bytes).decode()
 
 
@@ -63,19 +68,23 @@ def get_credentials() -> Credentials:
                 logger.info("Refreshing Gmail access token")
                 creds.refresh(Request())
                 logger.info("Gmail token refreshed successfully")
-                
+
                 # Save new access token
                 with get_session() as db:
                     tr = db.query(OAuthToken).filter_by(user_id="default").first()
                     if tr:
                         tr.access_token_encrypted = encrypt_token(creds.token)
                         if creds.refresh_token:
-                            tr.refresh_token_encrypted = encrypt_token(creds.refresh_token)
+                            tr.refresh_token_encrypted = encrypt_token(
+                                creds.refresh_token
+                            )
             else:
                 raise RuntimeError("Token missing. Visit /login to authenticate.")
         except Exception as exc:
             logger.error("Authentication failed", error=str(exc))
-            raise RuntimeError(f"Gmail auth failed: {exc}\nVisit /login to authenticate.") from exc
+            raise RuntimeError(
+                f"Gmail auth failed: {exc}\nVisit /login to authenticate."
+            ) from exc
 
     _credentials = creds
     return _credentials

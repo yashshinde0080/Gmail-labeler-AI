@@ -193,7 +193,7 @@ def create_label(name: str) -> tuple[str, str]:
         HttpError if the Gmail API call fails.
     """
     service = get_gmail_service()
-    
+
     color_choice = EXACT_LABEL_COLORS.get(name)
     if not color_choice:
         color_choice = GMAIL_LABEL_COLORS[
