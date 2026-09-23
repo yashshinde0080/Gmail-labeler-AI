@@ -250,6 +250,46 @@ def create_or_update_retry(
     return retry
 
 
+def defer_rate_limited(
+    db: Session,
+    message_id: str,
+    error: str,
+    delay_seconds: int,
+) -> Retry:
+    """
+    Defer a message that could not be classified because Groq's rate limit
+    was hit.
+
+    Deliberately separate from create_or_update_retry: an exhausted quota
+    window is not the message's fault, so a deferral must not consume the
+    message's retry budget or mark it abandoned. Any abandoned row is
+    revived, because it never had a fair chance to be processed.
+    """
+    next_retry_at = datetime.now(UTC) + timedelta(seconds=max(0, delay_seconds))
+
+    existing = db.execute(
+        select(Retry).where(Retry.message_id == message_id)
+    ).scalar_one_or_none()
+
+    if existing:
+        existing.last_error = error
+        existing.next_retry_at = next_retry_at
+        existing.status = "pending"
+        db.flush()
+        return existing
+
+    retry = Retry(
+        message_id=message_id,
+        retry_count=0,
+        last_error=error,
+        next_retry_at=next_retry_at,
+        status="pending",
+    )
+    db.add(retry)
+    db.flush()
+    return retry
+
+
 def get_pending_retries(db: Session) -> list[Retry]:
     """Return all retry records that are due and not yet abandoned."""
     now = datetime.now(UTC)

@@ -18,7 +18,7 @@ import re
 import time
 from typing import Any
 
-from app.ai.groq_client import call_groq
+from app.ai.groq_client import GroqRateLimitedError, call_groq
 from app.ai.prompt import build_classification_prompt
 from app.config import get_settings
 from app.database.crud import create_ai_log
@@ -30,6 +30,18 @@ _settings = get_settings()
 
 # ── Type alias ────────────────────────────────────────────────────────────────
 ClassificationResult = dict[str, Any]
+
+# ── Text sanitisation ─────────────────────────────────────────────────────────
+# Control characters and angle brackets must never reach Gmail labels, the
+# database, or log output verbatim.
+_UNSAFE_CHARS = re.compile(r"[<>\x00-\x1f\x7f]")
+
+
+def _sanitise_text(value: str, max_length: int) -> str:
+    """Remove unsafe characters, collapse whitespace, and truncate."""
+    cleaned = _UNSAFE_CHARS.sub("", value)
+    return " ".join(cleaned.split())[:max_length].strip()
+
 
 # ── Default fallback result ───────────────────────────────────────────────────
 _FALLBACK: ClassificationResult = {
@@ -57,6 +69,13 @@ def classify_email(email_data: dict[str, Any]) -> ClassificationResult:
         6. Return the result dict.
 
     Always returns a valid ClassificationResult — never raises.
+
+    The result carries three bookkeeping keys so the caller can react to a
+    model that could not be consulted:
+
+        ai_success   — True only when Groq returned a response.
+        rate_limited — True when the free-tier rate limit blocked the call.
+        retry_after  — Suggested wait in seconds (present when rate limited).
     """
     message_id = email_data.get("message_id", "unknown")
     start = time.monotonic()
@@ -66,11 +85,24 @@ def classify_email(email_data: dict[str, Any]) -> ClassificationResult:
     # ── Call Groq ─────────────────────────────────────────────────────────
     groq_result: dict[str, Any] | None = None
     ai_success = False
+    rate_limited = False
+    retry_after: float | None = None
     error_msg: str | None = None
 
     try:
         groq_result = call_groq(prompt, message_id=message_id)
         ai_success = True
+    except GroqRateLimitedError as exc:
+        # Transient: the email was never classified. Flag it so the caller
+        # defers the message instead of labelling it "Uncategorised".
+        rate_limited = True
+        retry_after = exc.retry_after
+        error_msg = str(exc)
+        logger.warning(
+            "Groq rate limited — message should be deferred",
+            message_id=message_id,
+            retry_after_seconds=retry_after,
+        )
     except Exception as exc:
         error_msg = str(exc)
         logger.error(
@@ -108,6 +140,13 @@ def classify_email(email_data: dict[str, Any]) -> ClassificationResult:
 
     if not _settings.star_high_importance:
         classification["star"] = False
+
+    # ── Record how the call went (drives the scheduler's retry policy) ────
+    classification["ai_success"] = ai_success
+    classification["rate_limited"] = rate_limited
+    classification["error"] = error_msg
+    if retry_after is not None:
+        classification["retry_after"] = retry_after
 
     # ── Log to SQLite ─────────────────────────────────────────────────────
     _log_ai_call(
@@ -179,8 +218,7 @@ def _validate_and_sanitise(
     result: ClassificationResult = {}
 
     # category — must be a non-empty string; strip dangerous chars
-    category = str(data.get("category", "Uncategorised")).strip()
-    category = category[:64]
+    category = _sanitise_text(str(data.get("category", "Uncategorised")), 64)
     result["category"] = category or "Uncategorised"
 
     # confidence — integer 0-100
@@ -202,12 +240,11 @@ def _validate_and_sanitise(
     result["create_label"] = bool(data.get("create_label", False))
 
     # new_label — only if create_label is True
-    new_label = str(data.get("new_label", "")).strip()
-    new_label = new_label[:64]
+    new_label = _sanitise_text(str(data.get("new_label", "")), 64)
     result["new_label"] = new_label if result["create_label"] else ""
 
     # reason — plain text, truncate
-    result["reason"] = str(data.get("reason", ""))[:512]
+    result["reason"] = _sanitise_text(str(data.get("reason", "")), 512)
 
     return result
 

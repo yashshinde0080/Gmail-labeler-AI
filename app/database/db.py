@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
@@ -33,7 +33,9 @@ _settings = get_settings()
 # ── Engine ────────────────────────────────────────────────────────────────────
 engine = create_engine(
     _settings.database_url,
-    connect_args={"check_same_thread": False} if "sqlite" in _settings.database_url else {},
+    connect_args={"check_same_thread": False}
+    if "sqlite" in _settings.database_url
+    else {},
     pool_size=5,
     max_overflow=10,
     pool_recycle=3600,
