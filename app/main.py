@@ -18,16 +18,16 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-
-limiter = Limiter(key_func=get_remote_address)
+from slowapi.util import get_remote_address
 
 from app.api import router
 from app.config import get_settings
 from app.database.db import init_db
 from app.logger import get_logger, setup_logging
 from app.scheduler import start_scheduler, stop_scheduler
+
+limiter = Limiter(key_func=get_remote_address)
 
 # ── Bootstrap logging before anything else ────────────────────────────────────
 setup_logging()

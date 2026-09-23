@@ -22,6 +22,7 @@ from app.config import get_settings
 from app.database.crud import (
     create_or_update_retry,
     create_processed_email,
+    defer_rate_limited,
     delete_retry,
     get_pending_retries,
     is_already_processed,
@@ -31,11 +32,9 @@ from app.database.models import ProcessedEmail
 from app.gmail.auth import get_credentials
 from app.gmail.labels import (
     apply_label_to_message,
-    archive_message,
     create_label,
     fetch_and_sync_labels,
     find_best_label_match,
-    star_message,
 )
 from app.gmail.messages import get_message_detail
 from app.logger import get_logger
@@ -52,10 +51,10 @@ def get_scheduler() -> BackgroundScheduler:
     global _scheduler  # noqa: PLW0603
     if _scheduler is None:
         from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+
         from app.database.db import engine
-        jobstores = {
-            'default': SQLAlchemyJobStore(engine=engine)
-        }
+
+        jobstores = {"default": SQLAlchemyJobStore(engine=engine)}
         _scheduler = BackgroundScheduler(jobstores=jobstores, timezone="UTC")
     return _scheduler
 
@@ -87,6 +86,7 @@ def process_new_emails() -> dict[str, int]:
         "skipped": 0,
         "failed": 0,
         "labels_created": 0,
+        "deferred": 0,
     }
 
     # ── Step 1: Auth ──────────────────────────────────────────────────────
@@ -95,16 +95,16 @@ def process_new_emails() -> dict[str, int]:
     except Exception as exc:
         logger.error("Authentication failed — aborting cycle", error=str(exc))
         return summary
-        
+
     from app.database.crud import get_setting, set_setting
-    from app.gmail.service import get_gmail_service
     from app.gmail.messages import get_new_messages_from_history
-    
+    from app.gmail.service import get_gmail_service
+
     with get_session() as db:
         last_history_id = get_setting(db, "last_history_id")
-        
+
     service = get_gmail_service()
-    
+
     # ── Step 2: Establish Baseline if missing ─────────────────────────────
     if not last_history_id:
         try:
@@ -112,11 +112,21 @@ def process_new_emails() -> dict[str, int]:
             current_history_id = profile.get("historyId")
             if current_history_id:
                 with get_session() as db:
-                    set_setting(db, "last_history_id", str(current_history_id), "Latest Gmail History ID")
-                logger.info("Baseline historyId established. Skipping old emails.", history_id=current_history_id)
+                    set_setting(
+                        db,
+                        "last_history_id",
+                        str(current_history_id),
+                        "Latest Gmail History ID",
+                    )
+                logger.info(
+                    "Baseline historyId established. Skipping old emails.",
+                    history_id=current_history_id,
+                )
             return summary
         except Exception as exc:
-            logger.error("Failed to fetch Gmail profile for baseline historyId", error=str(exc))
+            logger.error(
+                "Failed to fetch Gmail profile for baseline historyId", error=str(exc)
+            )
             return summary
 
     # ── Step 3: Fetch new messages from History API ───────────────────────
@@ -125,7 +135,7 @@ def process_new_emails() -> dict[str, int]:
     except Exception as exc:
         logger.error("Failed to fetch history deltas", error=str(exc))
         return summary
-        
+
     if latest_history_id:
         with get_session() as db:
             set_setting(db, "last_history_id", str(latest_history_id))
@@ -144,8 +154,61 @@ def process_new_emails() -> dict[str, int]:
     logger.info("Processing new messages", count=len(message_ids))
 
     # ── Step 5: Process each message ──────────────────────────────────────
-    for message_id in message_ids:
+    process_message_batch(message_ids, label_map, summary)
+
+    logger.info(
+        "Processing cycle complete",
+        processed=summary["processed"],
+        skipped=summary["skipped"],
+        failed=summary["failed"],
+        labels_created=summary["labels_created"],
+        deferred=summary["deferred"],
+    )
+    return summary
+
+
+def process_message_batch(
+    message_ids: list[str],
+    label_map: dict[str, str],
+    summary: dict[str, int] | None = None,
+) -> dict[str, int]:
+    """
+    Process a batch of Gmail message IDs.
+
+    The caller has already advanced the stored historyId past these messages,
+    so nothing in this batch may be silently dropped: if Groq's rate limit is
+    hit, the current message *and every message after it* are pushed onto the
+    retry queue and the batch stops early. Hammering the API for the rest of
+    the batch would just burn the free-tier quota and fail every request.
+    """
+    if summary is None:
+        summary = {
+            "processed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "labels_created": 0,
+            "deferred": 0,
+        }
+
+    for index, message_id in enumerate(message_ids):
         result = _process_single_message(message_id, label_map)
+
+        if result == "rate_limited":
+            summary["deferred"] += 1
+            leftovers = message_ids[index + 1 :]
+            for leftover_id in leftovers:
+                _defer_rate_limited(
+                    leftover_id,
+                    "Deferred: Groq rate limit reached",
+                    retry_after=None,
+                )
+            if leftovers:
+                summary["deferred"] += len(leftovers)
+                logger.warning(
+                    "Rate limit reached — deferred the rest of the batch",
+                    deferred=len(leftovers),
+                )
+            break
 
         if result == "processed":
             summary["processed"] += 1
@@ -157,13 +220,6 @@ def process_new_emails() -> dict[str, int]:
             summary["processed"] += 1
             summary["labels_created"] += 1
 
-    logger.info(
-        "Processing cycle complete",
-        processed=summary["processed"],
-        skipped=summary["skipped"],
-        failed=summary["failed"],
-        labels_created=summary["labels_created"],
-    )
     return summary
 
 
@@ -172,6 +228,7 @@ def renew_gmail_watch() -> None:
     logger.info("Renewing Gmail Push Notification Watch...")
     try:
         from app.gmail.messages import start_watch
+
         start_watch()
     except Exception as exc:
         logger.error("Failed to renew Gmail Watch", error=str(exc))
@@ -189,6 +246,7 @@ def _process_single_message(
         "label_created" — success, a new Gmail label was created
         "skipped"       — already processed or excluded
         "failed"        — unrecoverable error (recorded in retries table)
+        "rate_limited"  — Groq's free tier is exhausted; deferred, not lost
     """
     start = time.monotonic()
 
@@ -216,6 +274,16 @@ def _process_single_message(
         classification = classify_email(email_data)
     except Exception as exc:
         _record_failure(message_id, f"Classification error: {exc}")
+        return "failed"
+
+    # Never label an email the model was not allowed to classify. A rate
+    # limit is transient, so defer it; anything else counts as a failure.
+    if not classification.get("ai_success", True):
+        error = classification.get("error") or "AI classification failed"
+        if classification.get("rate_limited"):
+            _defer_rate_limited(message_id, error, classification.get("retry_after"))
+            return "rate_limited"
+        _record_failure(message_id, error)
         return "failed"
 
     # ── Resolve label ─────────────────────────────────────────────────────
@@ -301,6 +369,36 @@ def _process_single_message(
     return "label_created" if label_created else "processed"
 
 
+def _defer_rate_limited(
+    message_id: str,
+    error: str,
+    retry_after: float | None = None,
+) -> None:
+    """
+    Push a message onto the retry queue because Groq's rate limit was hit.
+
+    Deferrals do not consume the message's failure budget — the email is fine,
+    the quota window just needs to reset.
+    """
+    delay_seconds = (
+        int(retry_after) if retry_after else _settings.groq_rate_limit_max_wait
+    )
+    delay_seconds = max(delay_seconds, 1)
+
+    logger.warning(
+        "Rate limited — deferring message",
+        message_id=message_id,
+        retry_in_seconds=delay_seconds,
+    )
+    with get_session() as db:
+        defer_rate_limited(
+            db,
+            message_id=message_id,
+            error=error,
+            delay_seconds=delay_seconds,
+        )
+
+
 def _record_failure(message_id: str, error: str) -> None:
     """Write a failed message to the retries table and processed_emails."""
     logger.error("Message processing failed", message_id=message_id, error=error)
@@ -346,7 +444,7 @@ def retry_failed_emails() -> None:
     except Exception:
         label_map = {}
 
-    for retry_record in pending:
+    for index, retry_record in enumerate(pending):
         msg_id = retry_record.message_id
         logger.info(
             "Retrying message", message_id=msg_id, attempt=retry_record.retry_count
@@ -362,7 +460,16 @@ def retry_failed_emails() -> None:
             if existing:
                 db.delete(existing)
 
-        _process_single_message(msg_id, label_map)
+        result = _process_single_message(msg_id, label_map)
+
+        if result == "rate_limited":
+            # The remaining retry rows stay pending in the DB — they will be
+            # picked up on the next run once the quota window has reset.
+            logger.warning(
+                "Rate limit reached — pausing retry queue",
+                remaining=len(pending) - index - 1,
+            )
+            break
 
 
 # ── Scheduler Lifecycle ───────────────────────────────────────────────────────

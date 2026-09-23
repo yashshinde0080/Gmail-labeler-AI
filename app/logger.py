@@ -31,7 +31,7 @@ def _configure_stdlib_logging(log_level: str, log_dir: str) -> None:
     handlers: list[logging.Handler] = [
         logging.StreamHandler(sys.stdout),
     ]
-    
+
     if os.getenv("VERCEL") != "1":
         log_path = Path(log_dir) / "app.log"
         handlers.append(logging.FileHandler(log_path, encoding="utf-8"))

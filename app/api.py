@@ -14,12 +14,20 @@ Endpoints:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any
 import base64
 import json
+from datetime import UTC, datetime
+from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -108,14 +116,20 @@ class MetricsResponse(BaseModel):
 
 _oauth_state: dict[str, str] = {}
 
+
 @router.get("/", tags=["General"])
-async def root(code: str | None = None, state: str | None = None, db: Session = Depends(get_db_session)) -> dict[str, str]:
+async def root(
+    code: str | None = None,
+    state: str | None = None,
+    db: Session = Depends(get_db_session),
+) -> dict[str, str]:
     """Welcome endpoint — confirms the API is alive and handles Google OAuth callback."""
     if code:
         from google_auth_oauthlib.flow import Flow
-        from app.gmail.auth import encrypt_token
+
         from app.database.models import OAuthToken
-        
+        from app.gmail.auth import encrypt_token
+
         client_config = {
             "web": {
                 "client_id": _settings.gmail_client_id,
@@ -124,30 +138,33 @@ async def root(code: str | None = None, state: str | None = None, db: Session = 
                 "token_uri": _settings.gmail_token_uri,
                 "auth_provider_x509_cert_url": _settings.gmail_cert_url,
                 "client_secret": _settings.gmail_client_secret,
-                "redirect_uris": [_settings.gmail_redirect_uri]
+                "redirect_uris": [_settings.gmail_redirect_uri],
             }
         }
         flow = Flow.from_client_config(client_config, scopes=_settings.scopes_list)
         flow.redirect_uri = _settings.gmail_redirect_uri
-        
+
         # Restore PKCE code verifier
         if "code_verifier" in _oauth_state:
             flow.code_verifier = _oauth_state["code_verifier"]
-            
+
         flow.fetch_token(code=code)
-        
+
         creds = flow.credentials
         token_record = db.query(OAuthToken).filter_by(user_id="default").first()
         if not token_record:
             token_record = OAuthToken(user_id="default")
             db.add(token_record)
-        
+
         token_record.access_token_encrypted = encrypt_token(creds.token)
         if creds.refresh_token:
             token_record.refresh_token_encrypted = encrypt_token(creds.refresh_token)
-            
+
         db.commit()
-        return {"status": "success", "message": "Authenticated! Token saved to DB. You can close this window."}
+        return {
+            "status": "success",
+            "message": "Authenticated! Token saved to DB. You can close this window.",
+        }
 
     return {
         "service": "Gmail AI Auto Labeler",
@@ -161,8 +178,9 @@ async def root(code: str | None = None, state: str | None = None, db: Session = 
 @router.get("/login", tags=["General"])
 async def login():
     """Redirects to Google for OAuth authentication."""
-    from google_auth_oauthlib.flow import Flow
     from fastapi.responses import RedirectResponse
+    from google_auth_oauthlib.flow import Flow
+
     client_config = {
         "web": {
             "client_id": _settings.gmail_client_id,
@@ -171,16 +189,18 @@ async def login():
             "token_uri": _settings.gmail_token_uri,
             "auth_provider_x509_cert_url": _settings.gmail_cert_url,
             "client_secret": _settings.gmail_client_secret,
-            "redirect_uris": [_settings.gmail_redirect_uri]
+            "redirect_uris": [_settings.gmail_redirect_uri],
         }
     }
     flow = Flow.from_client_config(client_config, scopes=_settings.scopes_list)
     flow.redirect_uri = _settings.gmail_redirect_uri
-    auth_url, state = flow.authorization_url(prompt="consent", access_type="offline", include_granted_scopes="true")
-    
+    auth_url, state = flow.authorization_url(
+        prompt="consent", access_type="offline", include_granted_scopes="true"
+    )
+
     _oauth_state["state"] = state
     _oauth_state["code_verifier"] = flow.code_verifier
-    
+
     return RedirectResponse(auth_url)
 
 
@@ -256,6 +276,7 @@ async def get_logs(
 
 # ── Push Notifications (Webhooks) ──────────────────────────────────────────────
 
+
 @router.post("/webhook/gmail", tags=["Gmail Push"])
 async def gmail_webhook(
     request: Request,
@@ -271,17 +292,18 @@ async def gmail_webhook(
         data_b64 = message.get("data")
         if not data_b64:
             return {"status": "ignored", "reason": "no data"}
-            
+
         data_json = base64.b64decode(data_b64).decode("utf-8")
         event = json.loads(data_json)
         history_id = event.get("historyId")
-        
+
         logger.info("Webhook received", history_id=history_id)
-        
+
         if not history_id:
             return {"status": "ignored", "reason": "no historyId"}
-            
+
         import os
+
         if os.getenv("VERCEL") == "1":
             # Serverless environments freeze after HTTP response. Must process synchronously.
             logger.info("Processing webhook synchronously for Vercel")
@@ -289,7 +311,7 @@ async def gmail_webhook(
         else:
             # Process in background for persistent containers
             background_tasks.add_task(_process_webhook, str(history_id))
-            
+
         return {"status": "ok"}
     except Exception as exc:
         logger.error("Webhook payload error", error=str(exc))
@@ -298,51 +320,56 @@ async def gmail_webhook(
 
 def _process_webhook(new_history_id: str) -> None:
     """Background task to fetch and process new emails based on historyId."""
-    from app.database.db import get_session
     from app.database.crud import get_setting, set_setting
-    from app.gmail.messages import get_new_messages_from_history
+    from app.database.db import get_session
     from app.gmail.labels import fetch_and_sync_labels
-    from app.scheduler import _process_single_message
-    
+    from app.gmail.messages import get_new_messages_from_history
+    from app.scheduler import process_message_batch
+
     with get_session() as db:
         last_history_id = get_setting(db, "last_history_id")
-        
+
     if not last_history_id:
         logger.info("No last_history_id found; setting baseline.")
         with get_session() as db:
-            set_setting(db, "last_history_id", new_history_id, "Latest Gmail History ID")
+            set_setting(
+                db, "last_history_id", new_history_id, "Latest Gmail History ID"
+            )
         return
 
     message_ids, latest_history_id = get_new_messages_from_history(last_history_id)
-    
+
     if latest_history_id:
         with get_session() as db:
             set_setting(db, "last_history_id", str(latest_history_id))
-            
+
     if not message_ids:
+        logger.info("No new messages from webhook")
         return
-        
+
     logger.info("Processing messages from webhook", count=len(message_ids))
     try:
         label_map = fetch_and_sync_labels()
     except Exception:
         label_map = {}
-        
-    for msg_id in message_ids:
-        _process_single_message(msg_id, label_map)
+
+    # Defers the rest of the batch automatically if Groq's rate limit is hit.
+    process_message_batch(message_ids, label_map)
 
 
 @router.get("/watch/status", tags=["Gmail Push"])
 async def watch_status(db: Session = Depends(get_db_session)):
     """Check the status of the Gmail Push Notification watch, or start it."""
+    from app.database.crud import set_setting
     from app.gmail.messages import start_watch
-    from app.database.crud import get_setting, set_setting
-    
+
     try:
         response = start_watch()
         history_id = response.get("historyId")
         if history_id:
-            set_setting(db, "last_history_id", str(history_id), "Latest Gmail History ID")
+            set_setting(
+                db, "last_history_id", str(history_id), "Latest Gmail History ID"
+            )
         return {"status": "success", "watch_response": response}
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}
@@ -352,18 +379,17 @@ async def watch_status(db: Session = Depends(get_db_session)):
 async def gmail_status(db: Session = Depends(get_db_session)):
     """Get the current sync state."""
     from app.database.crud import get_setting
+
     last_history_id = get_setting(db, "last_history_id")
     return {
         "pubsub_topic": _settings.gcp_pubsub_topic,
         "last_history_id": last_history_id,
-        "push_notifications_enabled": bool(last_history_id)
+        "push_notifications_enabled": bool(last_history_id),
     }
 
 
 # ── Vercel & Control ──────────────────────────────────────────────────────────
 
-import os
-from fastapi import Header
 
 def verify_vercel_cron(authorization: str | None = Header(None)):
     """Optional security check for Vercel Cron invocations."""
@@ -371,24 +397,36 @@ def verify_vercel_cron(authorization: str | None = Header(None)):
     if cron_secret and authorization != f"Bearer {cron_secret}":
         raise HTTPException(status_code=401, detail="Unauthorized Cron invocation")
 
+
 @router.get("/api/cron/renew_watch", tags=["Vercel Cron"])
 async def cron_renew_watch(auth: None = Depends(verify_vercel_cron)):
     """Vercel Serverless Cron endpoint to renew Gmail Watch."""
     from app.scheduler import renew_gmail_watch
+
     renew_gmail_watch()
     return {"status": "success"}
+
 
 @router.get("/api/cron/retry", tags=["Vercel Cron"])
 async def cron_retry_failed(auth: None = Depends(verify_vercel_cron)):
     """Vercel Serverless Cron endpoint to retry failed emails."""
     from app.scheduler import retry_failed_emails
+
     retry_failed_emails()
     return {"status": "success"}
 
+
+@router.get("/api/cron/process", tags=["Vercel Cron"])
 @router.post("/api/cron/process", tags=["Vercel Cron"])
 async def cron_process_emails(auth: None = Depends(verify_vercel_cron)):
-    """Vercel Serverless Cron endpoint for processing emails (Manual fallback)."""
+    """
+    Cron endpoint for processing new emails.
+
+    Exposed as both GET and POST: Vercel Cron Jobs always issue GET requests,
+    while POST stays available for manual invocations.
+    """
     from app.scheduler import process_new_emails
+
     summary = process_new_emails()
     return {"status": "success", "summary": summary}
 

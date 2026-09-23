@@ -28,11 +28,27 @@ class Settings(BaseSettings):
     # ── Groq AI ──────────────────────────────────────────────────────────
     groq_api_key: str = Field(..., description="Groq API key")
     groq_model: str = Field(
-        default="llama-3.3-70b-versatile",
+        default="llama-3.1-8b-instant",
         description="Groq model identifier",
     )
     groq_timeout: int = Field(default=30, description="Request timeout in seconds")
     groq_max_retries: int = Field(default=3, description="Max retries for Groq calls")
+    groq_requests_per_minute: int = Field(
+        default=30,
+        ge=1,
+        description=(
+            "Proactive pacing: maximum Groq requests per minute. "
+            "The llama-3.1-8b-instant free tier allows ~30 requests/min."
+        ),
+    )
+    groq_rate_limit_max_wait: int = Field(
+        default=60,
+        ge=1,
+        description=(
+            "Maximum seconds to wait for a rate-limit window before "
+            "deferring the message to the retry queue."
+        ),
+    )
 
     # ── Gmail OAuth2 ─────────────────────────────────────────────────────
     gmail_client_id: str = Field(..., description="Google OAuth2 client ID")
@@ -42,7 +58,9 @@ class Settings(BaseSettings):
     gmail_token_uri: str = Field(default="https://oauth2.googleapis.com/token")
     gmail_cert_url: str = Field(default="https://www.googleapis.com/oauth2/v1/certs")
     gmail_redirect_uri: str = Field(default="http://localhost:8000")
-    gcp_pubsub_topic: str = Field(default="projects/YOUR_PROJECT_ID/topics/YOUR_TOPIC_ID")
+    gcp_pubsub_topic: str = Field(
+        default="projects/YOUR_PROJECT_ID/topics/YOUR_TOPIC_ID"
+    )
     gmail_scopes: str = Field(default="https://www.googleapis.com/auth/gmail.modify")
 
     # ── Database & Security ──────────────────────────────────────────────
@@ -72,7 +90,9 @@ class Settings(BaseSettings):
     log_dir: str = Field(default="./data/logs")
 
     # ── Vercel ───────────────────────────────────────────────────────────
-    vercel_cron_secret: str | None = Field(default=None, description="Secret for securing cron endpoints")
+    vercel_cron_secret: str | None = Field(
+        default=None, description="Secret for securing cron endpoints"
+    )
 
     # ── Derived properties ───────────────────────────────────────────────
     @property
@@ -99,9 +119,10 @@ class Settings(BaseSettings):
     def ensure_directories(self) -> None:
         """Create all required data directories on startup (skipped on Vercel)."""
         import os
+
         if os.getenv("VERCEL") == "1":
             return
-            
+
         for path_str in (self.data_dir, self.log_dir):
             path = Path(path_str)
             path.mkdir(parents=True, exist_ok=True)
