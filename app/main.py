@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "Gmail AI Auto Labeler starting",
         model=_settings.groq_model,
         poll_interval_seconds=_settings.poll_interval_seconds,
-        database=_settings.database_url,
+        database=_settings.database_url_redacted,
     )
 
     init_db()

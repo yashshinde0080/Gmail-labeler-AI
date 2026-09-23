@@ -96,6 +96,13 @@ class Settings(BaseSettings):
 
     # ── Derived properties ───────────────────────────────────────────────
     @property
+    def database_url_redacted(self) -> str:
+        """Database URL with the password masked — the only form safe to log."""
+        import re
+
+        return re.sub(r"(://[^:@/]+):[^@]+@", r"\1:***@", self.database_url)
+
+    @property
     def scopes_list(self) -> list[str]:
         """Split comma-separated scopes into a proper list."""
         return [s.strip() for s in self.gmail_scopes.split(",")]

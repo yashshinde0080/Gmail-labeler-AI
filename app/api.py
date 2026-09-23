@@ -117,7 +117,7 @@ class MetricsResponse(BaseModel):
 _oauth_state: dict[str, str] = {}
 
 
-@router.get("/", tags=["General"])
+@router.api_route("/", methods=["GET", "HEAD"], tags=["General"])
 async def root(
     code: str | None = None,
     state: str | None = None,
@@ -161,6 +161,14 @@ async def root(
             token_record.refresh_token_encrypted = encrypt_token(creds.refresh_token)
 
         db.commit()
+
+        # The background scheduler may hold a stale/poisoned credentials
+        # object from before this login. Drop it so the very next poll uses
+        # the fresh token instead of failing with invalid_grant forever.
+        from app.gmail.auth import invalidate_credentials
+
+        invalidate_credentials()
+
         return {
             "status": "success",
             "message": "Authenticated! Token saved to DB. You can close this window.",

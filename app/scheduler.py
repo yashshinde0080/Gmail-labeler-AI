@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from googleapiclient.errors import HttpError
 
 from app.ai.classifier import classify_email
 from app.config import get_settings
@@ -132,6 +133,23 @@ def process_new_emails() -> dict[str, int]:
     # ── Step 3: Fetch new messages from History API ───────────────────────
     try:
         message_ids, latest_history_id = get_new_messages_from_history(last_history_id)
+    except HttpError as exc:
+        if exc.resp.status in (401, 403):
+            # Cached credentials were rejected (e.g. revoked refresh token).
+            # Drop the cache so the next cycle rebuilds them from the DB —
+            # otherwise every poll fails identically until restart.
+            from app.gmail.auth import invalidate_credentials
+
+            invalidate_credentials()
+            logger.error(
+                "Gmail rejected credentials — cache cleared; will retry "
+                "with a fresh token next cycle (visit /login if this "
+                "error persists)",
+                status=exc.resp.status,
+            )
+            return summary
+        logger.error("Failed to fetch history deltas", error=str(exc))
+        return summary
     except Exception as exc:
         logger.error("Failed to fetch history deltas", error=str(exc))
         return summary
