@@ -7,6 +7,7 @@ Builds Credentials dynamically and uses encrypted DB storage.
 from __future__ import annotations
 
 from cryptography.fernet import Fernet
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 
@@ -80,6 +81,25 @@ def get_credentials() -> Credentials:
                             )
             else:
                 raise RuntimeError("Token missing. Visit /login to authenticate.")
+        except RefreshError as exc:
+            # invalid_grant is permanent: the refresh token was revoked or has
+            # expired (Google also expires them for apps in "Testing" mode).
+            # Delete the poisoned record so every cycle stops attempting a
+            # doomed refresh, and require a fresh /login.
+            _credentials = None
+            with get_session() as db:
+                poisoned = db.query(OAuthToken).filter_by(user_id="default").first()
+                if poisoned:
+                    db.delete(poisoned)
+            logger.error(
+                "Gmail refresh token rejected (invalid_grant) — "
+                "visit /login to re-authenticate",
+                error=str(exc),
+            )
+            raise RuntimeError(
+                f"Gmail refresh token was rejected: {exc}\n"
+                f"Visit /login to re-authenticate."
+            ) from exc
         except Exception as exc:
             logger.error("Authentication failed", error=str(exc))
             raise RuntimeError(

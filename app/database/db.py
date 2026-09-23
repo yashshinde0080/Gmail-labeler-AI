@@ -57,7 +57,7 @@ def init_db() -> None:
     Create all tables that do not already exist.
     Call once at application startup — idempotent.
     """
-    logger.info("Initialising database", url=_settings.database_url)
+    logger.info("Initialising database", url=_settings.database_url_redacted)
     Base.metadata.create_all(bind=engine)
     logger.info("Database ready")
 
